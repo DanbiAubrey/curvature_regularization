@@ -15,27 +15,62 @@ import sys
 import random
 import argparse
 import time
+import pandas as pd
 
+import curvature_regularization
 import mygraph
 from language_model import Skipgram
 
 from collections import Counter
-from gensim.models import Word2Vec
+from gensim.models import Word2Vec, KeyedVectors
 from gensim.models.word2vec import Vocab
 from multiprocessing import cpu_count
 import networkx as nx
 import numpy as np
 import scipy.sparse as sp
+import cmath
+
+import logging
+from gensim.models.callbacks import CallbackAny2Vec
+
 
 
 # In[ ]:
 
+def __get_logger():
 
+    __logger = logging.getLogger('logger')
+
+    formatter = logging.Formatter('LOG##LOGSAMPLE##%(levelname)s##%(asctime)s##%(message)s >> @@file::%(filename)s@@line::%(lineno)s')
+
+    stream_handler = logging.StreamHandler()
+
+    stream_handler.setFormatter(formatter)
+
+    __logger.addHandler(stream_handler)
+
+    __logger.setLevel(logging.INFO)
+
+    return __logger
+
+class callback(CallbackAny2Vec):
+    '''Callback to print loss after each epoch.'''
+
+    def __init__(self):
+        self.epoch = 0
+
+    def on_epoch_end(self, model):
+        loss = model.get_latest_training_loss()
+        print('Loss after epoch {}: {}'.format(self.epoch, loss))
+        self.epoch += 1
+        
 #DeepWalk process
 def deepwalk_process(args):
 
   start_time = time.time()#processing time measurement
 
+  logger = __get_logger()
+    
   if args.format == "adjacency":
     graph_adjacency, num_nodes, num_edges = text_to_adjacency(args.input)
     G = mygraph.Graph(graph_adjacency, num_nodes, num_edges)#graph object
@@ -51,26 +86,102 @@ def deepwalk_process(args):
 
   print("\nData size (walks*length): {}".format(data_size))
     
+  #Embedding phase  
   print("\nWalking...")
+  #shape(340 x 40)
   walks = G.build_deep_walk(num_paths=args.number_walks, path_length=args.walks_length, 
                             alpha=0, rand=random.Random(args.seed))
-  
+
   print("\nCounting vertex frequency...")
   vertex_counts = count_words(walks)# dictionary
 
   print("\nTraining...")
   if args.model == 'skipgram':
+    #create skipgram model
     language_model = Skipgram(sentences=walks, vocabulary_counts=vertex_counts,size=args.dimension,
-                     window=args.window_size, min_count=0, trim_rule=None, workers=cpu_count())
-    print(language_model)
+                     window=args.window_size, min_count=0, trim_rule=None, workers=cpu_count(), compute_loss=True, callbacks=[callback()])
+    
+    #save skipgram model
+    language_model.save("skipgram_model")
+    
+    #reload skipgram model
+    model = Skipgram.load("skipgram_model")
+    
+    ####-------------------------------------------------------------------------------####
+    ####                              embedding Generation                             ####
+    ####-------------------------------------------------------------------------------####
+    
+    # for t iterations do
+    for t in range(args.epoch):
+        # while not converged do -> minimize embedding loss term
+        model.train(sentences=walks, total_examples=1, epochs=args.epoch, compute_loss=True, callbacks=[callback()])
+        model.wv.save_word2vec_format(args.output)
+
+        # load embeddings
+        embedding_results = {}
+        for i in range(G.num_of_nodes):
+            embedding_results[i] = list(model.wv[str(i)])
+            #embedding_results.append(model.wv[str(i)])
+        
+        embedding_dim = len(embedding_results[0])
+        
+        # convert n-dimensional embedding to 2-dim(to satisfy Theorem 1.)
+        df = pd.DataFrame(columns = range(0,embedding_dim))
+
+        for i in range(G.num_of_nodes):
+            df.loc[i] = embedding_results[float(i)]
+    
+        #print(df)
+
+        #Implement PCA to reduce dimensionality of embeddings
+
+        #vector representation(embeddings) list
+        X = df.values.tolist()
+        #print(X)
+        #Computing correlation of matrix
+        X_corr=df.corr()
+
+        #Computing eigen values and eigen vectors
+        values,vectors=np.linalg.eig(X_corr)
+
+        #Sorting the eigen vectors coresponding to eigen values in descending order
+        arg = (-values).argsort()
+        values = vectors[arg]
+        vectors = vectors[:, arg]
+
+        #Taking first 2 components which explain maximum variance for projecting
+        new_vectors=vectors[:,:2]
+
+        #Projecting it onto new dimesion with 2 axis
+        neww_X=np.dot(X,new_vectors)
+        neww_X = neww_X.real
+        
+        #print(neww_X)
+        
+        ####-------------------------------------------------------------------------------####
+        ####                          curvature regularization phase                       ####
+        ####-------------------------------------------------------------------------------####
+        
+        # while not converged do -> minimize curvature regularization term
+        
+        #generate random walks(walk length :5)
+        
+        walks_2 = G.build_deep_walk_for_abs(num_paths=args.number_walks, path_length=args.walks_length_2, 
+                            alpha=0, rand=random.Random(args.seed))
+        
+        curvature_reg_model = curvature_regularization.abs_curvature_regularization(walks_2, 
+                                                                                    neww_X,num_walks,G.num_of_nodes, model.syn1,args.dimension)
+        curvature_reg_model.curvature_regularization()
+
+    
   else:
     raise Exception('language model is not Skipgram')
     
   total_time = time.time() - start_time
 
-  print("\nTraining completed")
-  print("\nembeddings has been generated")
-  language_model.wv.save_word2vec_format(args.output)
+#   print("\nTraining completed")
+#   print("\nembeddings have been generated")
+#   
   print("\nProcessing time: {:.2f}".format(total_time))
 
 
@@ -138,7 +249,11 @@ def main():
   parser.add_argument('--model', default='skipgram', help='language modeling(skipgram)')
   parser.add_argument('--seed', default=0, type=int, help='Random seed for random walk')
   parser.add_argument('--output', required=True, help="output embeddings file")
-  #add argument for "window_size=5"
+  parser.add_argument('--epoch', required=True, default=1, type=int, help="traning epoch")# t iteration in Alg.1
+  parser.add_argument('--walks-length-2', default=40, type=int)#window size
+  #parser.add_argument('--number-random-walks', default=33, type=int)#walk length
+  
+
     
   args = parser.parse_args()
 

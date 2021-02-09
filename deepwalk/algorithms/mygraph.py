@@ -11,6 +11,7 @@ import scipy.sparse as sp
 import networkx as nx
 
 
+
 # In[6]:
 
 
@@ -62,12 +63,79 @@ class Graph:
 
         return walks
 
+    def random_walk_for_abs(self, path_length, alpha=0, rand=random.Random(), start=None):
+        g = self.G
+        
+        if start:
+            path = [start]
+        else:
+            path = [rand.choice(list(g.nodes(data=False)))]#uniform in regard to Nodes while not uniform with edges
+        
+        while len(path) < path_length:
+            current = path[-1]# current node(end node)
+            if len(g[current]) > 0:# if there is neighbor of current node
+                if rand.random() >= alpha: 
+                    if rand.choice(list(g[current].keys())) != current:
+                        path.append(rand.choice(list(g[current].keys())))
+                    else:
+                        break
+                else:
+                    break
+            else:
+                break
+        return [str(node) for node in path]
+    
+    def build_deep_walk_for_abs(self, num_paths, path_length, alpha=0, rand=random.Random(0)):
+        g = self.G
+        
+        walks = []
+
+        #print(g)
+        nodes = list(g.nodes)
+
+        for cnt in range(num_paths):
+            rand.shuffle(nodes)#shuffle #to speed up the convergence
+            for node in nodes:
+                walks.append(self.random_walk_for_abs(path_length, alpha=alpha, rand=rand, start=node))
+
+        return walks
+    ####-------------------------------------------------------------------------------####
+    ####                               Newly added methods                              ####
+    ####-------------------------------------------------------------------------------####
+#     def random_walk(self, tail_node, alpha=0, rand=random.Random(), start=None):
+#         g = self.G
+        
+#         if start:
+#             path = [start]
+#         else:
+#             path = [rand.choice(list(g.nodes(data=False)))]#uniform in regard to Nodes while not uniform with edges
+        
+#         while path[-1] == tail_node:# until root meets the tail node
+#             current = path[-1]# current node(end node)
+#             if len(g[current]) > 0:# if there is neighbor of current node
+#                 if rand.random() >= alpha: # if probability of restart is less than random probability
+#                     path.append(rand.choice(list(g[current].keys())))
+#                 else:
+#                     path.append(path[0])
+#             else:
+#                 break
+#         return [str(node) for node in path]
+    
+#     def build_random_walk(self, num_paths, alpha=0, rand=random.Random(0)):
+#         g = self.G
+        
+#         walks = []
+
+#         #print(g)
+#         nodes = list(g.nodes)
+
+#         for cnt in range(num_paths):
+#             rand.shuffle(nodes)#shuffle #to speed up the convergence
+#             for node in nodes:#for entire nodes extract
+#                 for tail_node in nodes:
+#                     if tail_node != node:
+#                         walks.append(self.random_walk(tail_node, alpha=alpha, rand=rand, start=node))
+
+#         return walks
 
     # In[9]:
-
-
-
-
-
-
-
