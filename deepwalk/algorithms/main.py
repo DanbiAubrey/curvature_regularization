@@ -125,6 +125,22 @@ def deepwalk_process(args):
         
         embedding_dim = len(embedding_results[0])
         
+        #64-dim embeddings (shale(34*64))
+        original_embedding = []
+        
+        for i in list(embedding_results.keys()):
+            original_embedding.append(embedding_results[i])
+            
+            
+#         print(original_embedding)
+#         print(np.array(original_embedding).shape)
+#         exit()
+            
+           
+    ####-------------------------------------------------------------------------------####
+    ####                                     PCA                                       ####
+    ####-------------------------------------------------------------------------------####       
+        
         # convert n-dimensional embedding to 2-dim(to satisfy Theorem 1.)
         df = pd.DataFrame(columns = range(0,embedding_dim))
 
@@ -155,9 +171,7 @@ def deepwalk_process(args):
         #Projecting it onto new dimesion with 2 axis
         neww_X=np.dot(X,new_vectors)
         neww_X = neww_X.real
-        
-        #print(neww_X)
-        
+
         ####-------------------------------------------------------------------------------####
         ####                          curvature regularization phase                       ####
         ####-------------------------------------------------------------------------------####
@@ -170,8 +184,12 @@ def deepwalk_process(args):
                             alpha=0, rand=random.Random(args.seed))
         
         curvature_reg_model = curvature_regularization.abs_curvature_regularization(walks_2, 
-                                                                                    neww_X,num_walks,G.num_of_nodes, model.syn1,args.dimension)
-        curvature_reg_model.curvature_regularization()
+                                                                                    neww_X, num_walks,G.num_of_nodes, model.syn1, args.dimension, original_embedding)
+        
+        # meet the condition of Theorem 1.
+        curvature_reg_model.optimization()
+        
+        #minimize the two terms jointly
 
     
   else:
@@ -244,7 +262,7 @@ def main():
   parser.add_argument('--number-walks', default=10, type=int)#walk length
   parser.add_argument('--walks-length', default=40, type=int)#window size
   parser.add_argument('--window-size', default=5, type=int, help='Window size')
-  parser.add_argument('--dimension', type=int, default=64, help='Embeddings dimension(size)')
+  parser.add_argument('--dimension', type=int, default=34, help='Embeddings dimension(size)')#34
   parser.add_argument('--iter', default=1, type=int, help='Number of epochs in SGD')
   parser.add_argument('--model', default='skipgram', help='language modeling(skipgram)')
   parser.add_argument('--seed', default=0, type=int, help='Random seed for random walk')
