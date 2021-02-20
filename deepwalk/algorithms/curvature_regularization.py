@@ -7,10 +7,11 @@ import math
 from itertools import combinations
 import pandas as pd
 
+import torch
+import torch.nn as nn
+
 #randomwalk based curvature regularization
 #generate random walks for entire nodes
-
-#2-dim에만 해당되는 것인지(o) resolved!!!!
 
 #For theorem.1
 
@@ -23,10 +24,10 @@ class abs_curvature_regularization:
         self.V = num_nodes#34(karate.dataset)
         self.original_embeddings = original#shape(34,multi_dim(in here 34))
         self.W = W
-        self.alpha = 0.001#learning_rate
-        self.walks = walks#e.g., [['24', '24', '25', '25', '24', '31', '32', '18', '18', '33'],[...],...]
-        self.two_dim_embeddings = two_dim_embedding#[[0.9873423, 0.75242349],[...],...]]
-        self.vectorized_walks = node_to_vector(self.two_dim_embeddings, self.walks)#{33: [-0.5739610893522015, -0.12715181451182705], ...0: [0.8261685153358155, 0.13989395141095784]}]
+        self.alpha = 0.01#learning_rate
+        self.walks = walks#e.g., [['24', '24', '25', '25', '24', '31', '32', '18', '18', '33'],[...],...] list 
+        self.two_dim_embeddings = two_dim_embedding#[[0.9873423, 0.75242349],[...],...]] list
+        self.vectorized_walks = node_to_vector(self.two_dim_embeddings, self.walks)#dictionary
     
     #-------------------------------------------------------------------------------#
     #                       meet the condition of Theorem 1.                        #
@@ -53,17 +54,21 @@ class abs_curvature_regularization:
         multi_dim_embeddings = self.original_embeddings
         two_dim_embeddings = self.two_dim_embeddings
         epoch = 0
+
         # minimize til any part of P'_{ij} is less than pi/2(90 degree)(less than cosine 0)
         while any(entire_abs[i] >= 90 for i in range(len(entire_abs))):
+            print("abs:{}".format(entire_abs[0]))
             
-            self.train(multi_dim_embeddings, cosine_sum)
+            print("W:{}".format(self.W))
+            self.train(multi_dim_embeddings, each_cosine_sum)
             
             output = np.dot(self.W.T, multi_dim_embeddings)#shape(34,34)
             output = np.dot(self.W1.T, output)#shape(34,34)
+            output = softmax(output)
             
             print("Output:{}".format(output))
-            
-            two_dim_embeddings = multi_dim_to_two_dim(output,self.dim, self.V)
+            #print("shape:{}".format(output.shape))
+            two_dim_embeddings = multi_dim_to_two_dim(output, self.dim, self.V)
 
             vectorized_walks = node_to_vector(two_dim_embeddings, self.walks)
             abs_for_nodes = get_abs_for_nodes(two_dim_embeddings, self.walks, vectorized_walks)
@@ -94,13 +99,14 @@ class abs_curvature_regularization:
         self.W1 = np.random.uniform(-0.8, 0.8, (self.N, self.V)) # weight matrix_1(34,34)
         
     def feed_forward(self,X): 
-        #####______TODO______##### : figure out which shape to reshape into
+        #####______TODO______##### : recieve 34x34 embeddings(entire embeddings) instead of 34x1
         self.h = np.dot(self.W.T,X).reshape(self.N,1) #shape(N=34,1)
         self.u = np.dot(self.W1.T,self.h)#(34,1) 
+        self.y = softmax(self.u)
         #print(self.u)   
-        return self.u
+        return self.y
     
-    def backpropagate(self,x,node_num,each_cosine_sum): #train by backpropagating
+    def backpropagate(self, x, node_num, each_cosine_sum): #train by backpropagating
         #loss function
         
         #output of last layer
@@ -117,12 +123,10 @@ class abs_curvature_regularization:
         cos_abs_u = each_cosine_sum[node_num]
         #print(cos_abs_u)
         
-        
-        term = np.array(cos_abs_u)#shape(1,34)
+        term = np.array(cos_abs_u)
 
         #e = self.y - np.asarray(t).reshape(self.V,2) #(34,2) - (34,2)
         # e.shape is V x 1 
-        #####______TODO______##### reshape the shape of e (it needs to be (34,2) not (34,2))
         dLdW1 = np.dot(self.h,term) # (34,1) x (1,34)
         X = x #.reshape(self.V,1)#shape(34,1)
         #X = np.array(x).reshape(self.V,1) 
@@ -136,12 +140,16 @@ class abs_curvature_regularization:
         
         for i in range(len(original_embeddings)):#shape(34,34)
             self.feed_forward(original_embeddings[i]) 
-            self.backpropagate(original_embeddings[i],i, each_cosine_sum) #two_dim_embeddings[i] : shape(1,34)
+            self.backpropagate(original_embeddings[i], i, each_cosine_sum) #two_dim_embeddings[i] : shape(1,34)
  
         
 #-------------------------------------------------------------------------------#
 #                              get_abs functions                                #
 #-------------------------------------------------------------------------------#
+
+def softmax(x): 
+    e_x = np.exp(x - np.max(x)) 
+    return e_x / e_x.sum() 
 
 #convert nodes in randomwalk to 2-dim vector
 def node_to_vector(two_dim_embeddings, walks):
@@ -240,7 +248,6 @@ def each_sum_cosine_of_curvature(V, total_turning_angles):
 
     return sum_of_angles
 
-#TODO: revise the code to work
 def multi_dim_to_two_dim(embedding_results, dim, num_nodes):
             # convert n-dimensional embedding to 2-dim(to satisfy Theorem 1.)
     embedding_dim = dim
